@@ -194,6 +194,16 @@ EXPORT_DEF int at_enqueue_initialization(struct cpvt *cpvt, at_cmd_t from_comman
 			continue;
 		if(st_cmds[in].cmd == CMD_AT_U2DIAG && CONF_SHARED(pvt, u2diag) == -1)
 			continue;
+		if(CONF_SHARED(pvt, disablesms))
+		{
+			if(st_cmds[in].cmd == CMD_AT_CSCA ||
+				st_cmds[in].cmd == CMD_AT_CMGF ||
+				st_cmds[in].cmd == CMD_AT_CPMS ||
+				st_cmds[in].cmd == CMD_AT_CNMI)
+			{
+				continue;
+			}
+		}
 
 		memcpy(&cmds[out], &st_cmds[in], sizeof(st_cmds[in]));
 
@@ -283,6 +293,11 @@ EXPORT_DEF int at_enqueue_sms(struct cpvt *cpvt, const char *destination, const 
 {
 	ssize_t res;
 	pvt_t* pvt = cpvt->pvt;
+
+	if (CONF_SHARED(pvt, disablesms)) {
+		chan_quectel_err = E_SMS_DISABLED;
+		return -1;
+	}
 
 	/* set default validity period */
 	if (validity_minutes <= 0)
@@ -740,6 +755,11 @@ EXPORT_DEF int at_enqueue_retrieve_sms(struct cpvt *cpvt, int index, at_cmd_supp
 {
 	pvt_t *pvt = cpvt->pvt;
 	int err;
+
+	if (CONF_SHARED(pvt, disablesms)) {
+		chan_quectel_err = E_SMS_DISABLED;
+		return -1;
+	}
 	at_queue_cmd_t cmds[] = {
 		ATQ_CMD_DECLARE_DYN2(CMD_AT_CMGR, RES_CMGR),
 	};
@@ -787,7 +807,13 @@ error:
  */
 EXPORT_DEF int at_enqueue_delete_sms(struct cpvt *cpvt, int index)
 {
+	pvt_t *pvt = cpvt->pvt;
 	int err;
+
+	if (CONF_SHARED(pvt, disablesms)) {
+		chan_quectel_err = E_SMS_DISABLED;
+		return -1;
+	}
 	at_queue_cmd_t cmds[] = {
 		ATQ_CMD_DECLARE_DYN(CMD_AT_CMGD)
 	};

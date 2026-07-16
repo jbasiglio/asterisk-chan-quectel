@@ -260,6 +260,17 @@ static int at_response_ok (struct pvt* pvt, at_res_t res)
 				ast_debug (1, "[%s] UCS-2 text encoding enabled\n", PVT_ID(pvt));
 
 				pvt->use_ucs2_encoding = 1;
+				if (CONF_SHARED(pvt, disablesms))
+				{
+					pvt->has_sms = 0;
+					if (!pvt->initialized)
+					{
+						pvt->timeout = DATA_READ_TIMEOUT;
+						pvt->initialized = 1;
+						ast_verb (3, "[%s] Quectel initialized and ready\n", PVT_ID(pvt));
+						manager_event_device_status(PVT_ID(pvt), "Initialize");
+					}
+				}
 				break;
 
 			case CMD_AT_CPMS:
@@ -362,6 +373,13 @@ static int at_response_ok (struct pvt* pvt, at_res_t res)
 
 			case CMD_AT_CSQ:
 				ast_debug (1, "[%s] Got signal strength result\n", PVT_ID(pvt));
+				if (!pvt->initialized)
+				{
+					pvt->timeout = DATA_READ_TIMEOUT;
+					pvt->initialized = 1;
+					ast_verb (3, "[%s] Quectel initialized and ready\n", PVT_ID(pvt));
+					manager_event_device_status(PVT_ID(pvt), "Initialize");
+				}
 				break;
 
 			case CMD_AT_CLVL:
@@ -547,6 +565,28 @@ static int at_response_error (struct pvt* pvt, at_res_t res)
 				ast_debug (1, "[%s] No UCS-2 encoding support\n", PVT_ID(pvt));
 
 				pvt->use_ucs2_encoding = 0;
+				if (CONF_SHARED(pvt, disablesms))
+				{
+					pvt->has_sms = 0;
+					if (!pvt->initialized)
+					{
+						pvt->timeout = DATA_READ_TIMEOUT;
+						pvt->initialized = 1;
+						ast_verb (3, "[%s] Quectel initialized and ready\n", PVT_ID(pvt));
+						manager_event_device_status(PVT_ID(pvt), "Initialize");
+					}
+				}
+				break;
+
+			case CMD_AT_CSQ:
+				ast_debug (1, "[%s] Got signal strength result error\n", PVT_ID(pvt));
+				if (!pvt->initialized)
+				{
+					pvt->timeout = DATA_READ_TIMEOUT;
+					pvt->initialized = 1;
+					ast_verb (3, "[%s] Quectel initialized and ready\n", PVT_ID(pvt));
+					manager_event_device_status(PVT_ID(pvt), "Initialize");
+				}
 				break;
 
 			case CMD_AT_A:

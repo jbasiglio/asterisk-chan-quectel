@@ -11,28 +11,25 @@
 */
 #include "ast_config.h"
 
-#include <asterisk/utils.h>		/* ast_free() */
+#include <asterisk/utils.h> /* ast_free() */
 
 #include "at_queue.h"
-#include "chan_quectel.h"		/* struct pvt */
+#include "chan_quectel.h" /* struct pvt */
 
 /*!
  * \brief Free an item data
  * \param cmd - struct at_queue_cmd
  */
 #/* */
-static void at_queue_free_data(at_queue_cmd_t * cmd)
-{
-	if(cmd->data)
-	{
-		if((cmd->flags & ATQ_CMD_FLAG_STATIC) == 0)
-		{
-			ast_free (cmd->data);
-			cmd->data = NULL;
-		}
-		/* right because work with copy of static data */
-	}
-	cmd->length = 0;
+static void at_queue_free_data(at_queue_cmd_t *cmd) {
+  if (cmd->data) {
+    if ((cmd->flags & ATQ_CMD_FLAG_STATIC) == 0) {
+      ast_free(cmd->data);
+      cmd->data = NULL;
+    }
+    /* right because work with copy of static data */
+  }
+  cmd->length = 0;
 }
 
 /*!
@@ -40,47 +37,42 @@ static void at_queue_free_data(at_queue_cmd_t * cmd)
  * \param e -- struct at_queue_task structure
  */
 #/* */
-static void at_queue_free (at_queue_task_t * task)
-{
-	unsigned no;
-	for(no = 0; no < task->cmdsno; no++)
-	{
-		at_queue_free_data(&task->cmds[no]);
-	}
-	ast_free (task);
+static void at_queue_free(at_queue_task_t *task) {
+  unsigned no;
+  for (no = 0; no < task->cmdsno; no++) {
+    at_queue_free_data(&task->cmds[no]);
+  }
+  ast_free(task);
 }
-
 
 /*!
  * \brief Remove an job item from the front of the queue, and free it
  * \param pvt -- pvt structure
  */
 #/* */
-static void at_queue_remove (struct pvt * pvt)
-{
-	at_queue_task_t * task = AST_LIST_REMOVE_HEAD (&pvt->at_queue, entry);
+static void at_queue_remove(struct pvt *pvt) {
+  at_queue_task_t *task = AST_LIST_REMOVE_HEAD(&pvt->at_queue, entry);
 
-	if (task)
-	{
-		PVT_STATE(pvt, at_tasks)--;
-		PVT_STATE(pvt, at_cmds) -= task->cmdsno - task->cindex;
-		ast_debug (4, "[%s] remove task with %u command(s) begin with '%s' expected response '%s' from queue\n",
-				PVT_ID(pvt), task->cmdsno, at_cmd2str (task->cmds[0].cmd),
-				at_res2str (task->cmds[0].res));
+  if (task) {
+    PVT_STATE(pvt, at_tasks)--;
+    PVT_STATE(pvt, at_cmds) -= task->cmdsno - task->cindex;
+    ast_debug(4,
+              "[%s] remove task with %u command(s) begin with '%s' expected "
+              "response '%s' from queue\n",
+              PVT_ID(pvt), task->cmdsno, at_cmd2str(task->cmds[0].cmd),
+              at_res2str(task->cmds[0].res));
 
-		at_queue_free(task);
-	}
+    at_queue_free(task);
+  }
 }
 
 #/* */
-static at_queue_cmd_t* at_queue_head_cmd_nc (const struct pvt * pvt)
-{
-	at_queue_task_t * e = AST_LIST_FIRST (&pvt->at_queue);
-	if(e)
-		return &e->cmds[e->cindex];
-	return NULL;
+static at_queue_cmd_t *at_queue_head_cmd_nc(const struct pvt *pvt) {
+  at_queue_task_t *e = AST_LIST_FIRST(&pvt->at_queue);
+  if (e)
+    return &e->cmds[e->cindex];
+  return NULL;
 }
-
 
 /*!
  * \brief Add an list of commands (task) to the back of the queue
@@ -91,44 +83,43 @@ static at_queue_cmd_t* at_queue_head_cmd_nc (const struct pvt * pvt)
  * \return task on success, NULL on error
  */
 #/* */
-static at_queue_task_t * at_queue_add (struct cpvt * cpvt, const at_queue_cmd_t * cmds, unsigned cmdsno, int prio)
-{
-	at_queue_task_t * e = NULL;
-	if(cmdsno > 0)
-	{
-		e = ast_malloc (sizeof(*e) + cmdsno * sizeof(*cmds));
-		if(e)
-		{
-			pvt_t * pvt = cpvt->pvt;
-			at_queue_task_t * first;
+static at_queue_task_t *at_queue_add(struct cpvt *cpvt,
+                                     const at_queue_cmd_t *cmds,
+                                     unsigned cmdsno, int prio) {
+  at_queue_task_t *e = NULL;
+  if (cmdsno > 0) {
+    e = ast_malloc(sizeof(*e) + cmdsno * sizeof(*cmds));
+    if (e) {
+      pvt_t *pvt = cpvt->pvt;
+      at_queue_task_t *first;
 
-			e->entry.next = 0;
-			e->cmdsno = cmdsno;
-			e->cindex = 0;
-			e->cpvt = cpvt;
+      e->entry.next = 0;
+      e->cmdsno = cmdsno;
+      e->cindex = 0;
+      e->cpvt = cpvt;
 
-			memcpy(&e->cmds[0], cmds, cmdsno * sizeof(*cmds));
+      memcpy(&e->cmds[0], cmds, cmdsno * sizeof(*cmds));
 
+      if (prio && (first = AST_LIST_FIRST(&pvt->at_queue)))
+        AST_LIST_INSERT_AFTER(&pvt->at_queue, first, e, entry);
+      else
+        AST_LIST_INSERT_TAIL(&pvt->at_queue, e, entry);
 
-			if(prio && (first = AST_LIST_FIRST (&pvt->at_queue)))
-				AST_LIST_INSERT_AFTER (&pvt->at_queue, first, e, entry);
-			else
-				AST_LIST_INSERT_TAIL (&pvt->at_queue, e, entry);
+      PVT_STATE(pvt, at_tasks)++;
+      PVT_STATE(pvt, at_cmds) += cmdsno;
 
-			PVT_STATE(pvt, at_tasks) ++;
-			PVT_STATE(pvt, at_cmds) += cmdsno;
+      PVT_STAT(pvt, at_tasks)++;
+      PVT_STAT(pvt, at_cmds) += cmdsno;
 
-			PVT_STAT(pvt, at_tasks) ++;
-			PVT_STAT(pvt, at_cmds) += cmdsno;
-
-			ast_debug (4, "[%s] insert task with %u commands begin with '%s' expected response '%s' %s of queue\n",
-					PVT_ID(pvt), e->cmdsno, at_cmd2str (e->cmds[0].cmd),
-					at_res2str (e->cmds[0].res), prio ? "after head" : "at tail");
-		}
-	}
-	return e;
+      ast_debug(4,
+                "[%s] insert task with %u commands begin with '%s' expected "
+                "response '%s' %s of queue\n",
+                PVT_ID(pvt), e->cmdsno, at_cmd2str(e->cmds[0].cmd),
+                at_res2str(e->cmds[0].res), prio ? "after head" : "at tail");
+    }
+  }
+  return e;
 }
-
 
 /*!
  * \brief Write to fd
@@ -143,31 +134,27 @@ static at_queue_task_t * at_queue_add (struct cpvt * cpvt, const at_queue_cmd_t 
  */
 
 #/* */
-EXPORT_DEF size_t write_all (int fd, const char* buf, size_t count)
-{
-	ssize_t out_count;
-	size_t total = 0;
-	unsigned errs = 10;
+EXPORT_DEF size_t write_all(int fd, const char *buf, size_t count) {
+  ssize_t out_count;
+  size_t total = 0;
+  unsigned errs = 10;
 
-	while (count > 0)
-	{
-		out_count = write (fd, buf, count);
-		if (out_count <= 0)
-		{
-			if(errno == EINTR || errno == EAGAIN)
-			{
-				errs--;
-				if(errs != 0)
-					continue;
-			}
-			break;
-		}
-		errs = 10;
-		count -= out_count;
-		buf += out_count;
-		total += out_count;
-	}
-	return total;
+  while (count > 0) {
+    out_count = write(fd, buf, count);
+    if (out_count <= 0) {
+      if (errno == EINTR || errno == EAGAIN) {
+        errs--;
+        if (errs != 0)
+          continue;
+      }
+      break;
+    }
+    errs = 10;
+    count -= out_count;
+    buf += out_count;
+    total += out_count;
+  }
+  return total;
 }
 
 /*!
@@ -184,20 +171,18 @@ EXPORT_DEF size_t write_all (int fd, const char* buf, size_t count)
  */
 
 #/* */
-EXPORT_DEF int at_write (struct pvt* pvt, const char* buf, size_t count)
-{
-	size_t wrote;
+EXPORT_DEF int at_write(struct pvt *pvt, const char *buf, size_t count) {
+  size_t wrote;
 
-	ast_debug (5, "[%s] [%.*s]\n", PVT_ID(pvt), (int) count, buf);
+  ast_debug(5, "[%s] [%.*s]\n", PVT_ID(pvt), (int)count, buf);
 
-	wrote = write_all(pvt->data_fd, buf, count);
-	PVT_STAT(pvt, d_write_bytes) += wrote;
-	if(wrote != count)
-	{
-		ast_debug (1, "[%s] write() error: %d\n", PVT_ID(pvt), errno);
-	}
+  wrote = write_all(pvt->data_fd, buf, count);
+  PVT_STAT(pvt, d_write_bytes) += wrote;
+  if (wrote != count) {
+    ast_debug(1, "[%s] write() error: %d\n", PVT_ID(pvt), errno);
+  }
 
-	return wrote != count;
+  return wrote != count;
 }
 
 /*!
@@ -205,26 +190,27 @@ EXPORT_DEF int at_write (struct pvt* pvt, const char* buf, size_t count)
  * \param pvt -- pvt structure
  */
 #/* */
-EXPORT_DEF void at_queue_remove_cmd (struct pvt* pvt, at_res_t res)
-{
-	at_queue_task_t * task = AST_LIST_FIRST (&pvt->at_queue);
+EXPORT_DEF void at_queue_remove_cmd(struct pvt *pvt, at_res_t res) {
+  at_queue_task_t *task = AST_LIST_FIRST(&pvt->at_queue);
 
-	if (task)
-	{
-		unsigned index = task->cindex;
+  if (task) {
+    unsigned index = task->cindex;
 
-		task->cindex++;
-		PVT_STATE(pvt, at_cmds)--;
-		ast_debug (4, "[%s] remove command '%s' expected response '%s' real '%s' cmd %u/%u flags 0x%02x from queue\n",
-				PVT_ID(pvt), at_cmd2str (task->cmds[index].cmd),
-				at_res2str (task->cmds[index].res), at_res2str (res),
-				task->cindex, task->cmdsno, task->cmds[index].flags);
+    task->cindex++;
+    PVT_STATE(pvt, at_cmds)--;
+    ast_debug(4,
+              "[%s] remove command '%s' expected response '%s' real '%s' cmd "
+              "%u/%u flags 0x%02x from queue\n",
+              PVT_ID(pvt), at_cmd2str(task->cmds[index].cmd),
+              at_res2str(task->cmds[index].res), at_res2str(res), task->cindex,
+              task->cmdsno, task->cmds[index].flags);
 
-		if((task->cindex >= task->cmdsno) || (task->cmds[index].res != res && (task->cmds[index].flags & ATQ_CMD_FLAG_IGNORE) == 0))
-		{
-			at_queue_remove(pvt);
-		}
-	}
+    if ((task->cindex >= task->cmdsno) ||
+        (task->cmds[index].res != res &&
+         (task->cmds[index].flags & ATQ_CMD_FLAG_IGNORE) == 0)) {
+      at_queue_remove(pvt);
+    }
+  }
 }
 
 /*!
@@ -233,33 +219,32 @@ EXPORT_DEF void at_queue_remove_cmd (struct pvt* pvt, at_res_t res)
  * \return 0 on success, non-0 on error
  */
 #/* */
-EXPORT_DEF int at_queue_run (struct pvt * pvt)
-{
-	int fail = 0;
-	at_queue_cmd_t * cmd = at_queue_head_cmd_nc(pvt);
+EXPORT_DEF int at_queue_run(struct pvt *pvt) {
+  int fail = 0;
+  at_queue_cmd_t *cmd = at_queue_head_cmd_nc(pvt);
 
-	if(cmd)
-	{
-		if(cmd->length > 0)
-		{
-			ast_debug (4, "[%s] write command '%s' expected response '%s' length %u\n",
-					PVT_ID(pvt), at_cmd2str (cmd->cmd), at_res2str (cmd->res), cmd->length);
+  if (cmd) {
+    if (cmd->length > 0) {
+      ast_debug(4, "[%s] write command '%s' expected response '%s' length %u\n",
+                PVT_ID(pvt), at_cmd2str(cmd->cmd), at_res2str(cmd->res),
+                cmd->length);
 
-			fail = at_write(pvt, cmd->data, cmd->length);
-			if(fail)
-			{
-				ast_log (LOG_ERROR, "[%s] Error write command '%s' expected response '%s' length %u, cancel\n", PVT_ID(pvt), at_cmd2str (cmd->cmd), at_res2str (cmd->res), cmd->length);
-				at_queue_remove_cmd(pvt, cmd->res + 1);
-			}
-			else
-			{
-				/* set expire time */
-				cmd->timeout = ast_tvadd (ast_tvnow(), cmd->timeout);
+      fail = at_write(pvt, cmd->data, cmd->length);
+      if (fail) {
+        ast_log(LOG_ERROR,
+                "[%s] Error write command '%s' expected response '%s' length "
+                "%u, cancel\n",
+                PVT_ID(pvt), at_cmd2str(cmd->cmd), at_res2str(cmd->res),
+                cmd->length);
+        at_queue_remove_cmd(pvt, cmd->res + 1);
+      } else {
+        /* set expire time */
+        cmd->timeout = ast_tvadd(ast_tvnow(), cmd->timeout);
 
-				/* free data and mark as written */
-				at_queue_free_data(cmd);
-			}
-		}
+        /* free data and mark as written */
+        at_queue_free_data(cmd);
+      }
+    }
 #if 0
 		else
 		{
@@ -272,9 +257,9 @@ EXPORT_DEF int at_queue_run (struct pvt * pvt)
 			}
 		}
 #endif /* 0 */
-	}
-	/* else empty nothing todo */
-	return fail;
+  }
+  /* else empty nothing todo */
+  return fail;
 }
 
 /*!
@@ -283,45 +268,42 @@ EXPORT_DEF int at_queue_run (struct pvt * pvt)
  * \return 0 on success non-0 on error
  */
 #/* */
-EXPORT_DEF int at_queue_insert_const (struct cpvt * cpvt, const at_queue_cmd_t * cmds, unsigned cmdsno, int athead)
-{
-	return at_queue_add(cpvt, cmds, cmdsno, athead) == NULL || at_queue_run(cpvt->pvt);
+EXPORT_DEF int at_queue_insert_const(struct cpvt *cpvt,
+                                     const at_queue_cmd_t *cmds,
+                                     unsigned cmdsno, int athead) {
+  return at_queue_add(cpvt, cmds, cmdsno, athead) == NULL ||
+         at_queue_run(cpvt->pvt);
 }
 
 #/* */
-EXPORT_DEF int at_queue_insert_uid(struct cpvt * cpvt, at_queue_cmd_t * cmds, unsigned cmdsno, int athead, int uid)
-{
-	unsigned idx;
-	at_queue_task_t *task = at_queue_add(cpvt, cmds, cmdsno, athead);
-	task->uid = uid;
+EXPORT_DEF int at_queue_insert_uid(struct cpvt *cpvt, at_queue_cmd_t *cmds,
+                                   unsigned cmdsno, int athead, int uid) {
+  unsigned idx;
+  at_queue_task_t *task = at_queue_add(cpvt, cmds, cmdsno, athead);
+  task->uid = uid;
 
-	if(!task)
-	{
-		for(idx = 0; idx < cmdsno; idx++)
-		{
-			at_queue_free_data(&cmds[idx]);
-		}
-	}
+  if (!task) {
+    for (idx = 0; idx < cmdsno; idx++) {
+      at_queue_free_data(&cmds[idx]);
+    }
+  }
 
-	if (at_queue_run(cpvt->pvt))
-		task = NULL;
+  if (at_queue_run(cpvt->pvt))
+    task = NULL;
 
-	return task == NULL;
+  return task == NULL;
 }
 
 #/* */
-EXPORT_DEF int at_queue_insert(struct cpvt * cpvt, at_queue_cmd_t * cmds, unsigned cmdsno, int athead)
-{
-	return at_queue_insert_uid(cpvt, cmds, cmdsno, athead, 0);
+EXPORT_DEF int at_queue_insert(struct cpvt *cpvt, at_queue_cmd_t *cmds,
+                               unsigned cmdsno, int athead) {
+  return at_queue_insert_uid(cpvt, cmds, cmdsno, athead, 0);
 }
 
-
-
 #/* */
-EXPORT_DEF void at_queue_handle_result (struct pvt* pvt, at_res_t res)
-{
-	/* move queue */
-	at_queue_remove_cmd(pvt, res);
+EXPORT_DEF void at_queue_handle_result(struct pvt *pvt, at_res_t res) {
+  /* move queue */
+  at_queue_remove_cmd(pvt, res);
 }
 
 /*!
@@ -330,14 +312,12 @@ EXPORT_DEF void at_queue_handle_result (struct pvt* pvt, at_res_t res)
  */
 
 #/* */
-EXPORT_DEF void at_queue_flush (struct pvt* pvt)
-{
-	struct at_queue_task* task;
+EXPORT_DEF void at_queue_flush(struct pvt *pvt) {
+  struct at_queue_task *task;
 
-	while ((task = AST_LIST_FIRST (&pvt->at_queue)))
-	{
-		at_queue_remove(pvt);
-	}
+  while ((task = AST_LIST_FIRST(&pvt->at_queue))) {
+    at_queue_remove(pvt);
+  }
 }
 
 /*!
@@ -346,11 +326,10 @@ EXPORT_DEF void at_queue_flush (struct pvt* pvt)
  * \return a pointer to the first command of the given queue
  */
 #/* */
-EXPORT_DEF const struct at_queue_task* at_queue_head_task (const struct pvt * pvt)
-{
-	return AST_LIST_FIRST (&pvt->at_queue);
+EXPORT_DEF const struct at_queue_task *
+at_queue_head_task(const struct pvt *pvt) {
+  return AST_LIST_FIRST(&pvt->at_queue);
 }
-
 
 /*!
  * \brief Get the first command of a queue
@@ -358,24 +337,20 @@ EXPORT_DEF const struct at_queue_task* at_queue_head_task (const struct pvt * pv
  * \return a pointer to the first command of the given queue
  */
 #/* */
-EXPORT_DEF const at_queue_cmd_t * at_queue_head_cmd(const struct pvt * pvt)
-{
-	return at_queue_task_cmd(at_queue_head_task(pvt));
+EXPORT_DEF const at_queue_cmd_t *at_queue_head_cmd(const struct pvt *pvt) {
+  return at_queue_task_cmd(at_queue_head_task(pvt));
 }
 
 #/* */
-EXPORT_DEF int at_queue_timeout(const struct pvt * pvt)
-{
-	int ms_timeout = -1;
-	const at_queue_cmd_t * cmd = at_queue_head_cmd(pvt);
+EXPORT_DEF int at_queue_timeout(const struct pvt *pvt) {
+  int ms_timeout = -1;
+  const at_queue_cmd_t *cmd = at_queue_head_cmd(pvt);
 
-	if(cmd)
-	{
-		if(cmd->length == 0)
-		{
-			ms_timeout = ast_tvdiff_ms(cmd->timeout, ast_tvnow());
-		}
-	}
+  if (cmd) {
+    if (cmd->length == 0) {
+      ms_timeout = ast_tvdiff_ms(cmd->timeout, ast_tvnow());
+    }
+  }
 
-	return ms_timeout;
+  return ms_timeout;
 }
